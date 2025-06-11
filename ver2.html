@@ -241,10 +241,33 @@
                 this.leafNodes = 0;
                 this.drawTimeout = null;
                 
+                // 共有ジオメトリを事前作成
+                this.createSharedGeometries();
+                
                 this.initThreeJS();
                 this.setupEventListeners();
                 this.createBroccoli();
                 this.animate();
+            }
+
+            createSharedGeometries() {
+                // 花蕾用の共有ジオメトリ（複数サイズ）
+                this.floretGeometries = {
+                    small: new THREE.SphereGeometry(0.01, 6, 4),
+                    medium: new THREE.SphereGeometry(0.015, 6, 4), 
+                    large: new THREE.SphereGeometry(0.02, 6, 4)
+                };
+
+                // 枝用の共有ジオメトリ（複数太さ）
+                this.branchGeometries = {
+                    thin: new THREE.CylinderGeometry(0.01, 0.015, 1, 6),
+                    medium: new THREE.CylinderGeometry(0.02, 0.03, 1, 6),
+                    thick: new THREE.CylinderGeometry(0.03, 0.05, 1, 8)
+                };
+
+                // 茎用の共有ジオメトリ
+                this.stemGeometry = new THREE.CylinderGeometry(0.8, 1.0, 1, 8);
+                this.stemTopGeometry = new THREE.CylinderGeometry(0.4, 0.8, 1, 8);
             }
 
             initThreeJS() {
@@ -370,7 +393,6 @@
                 });
             }
 
-            // === ここから修正 ===
             createBroccoli() {
                 // 既存のブロッコリーを削除
                 while (this.broccoliGroup.children.length > 0) {
@@ -383,36 +405,24 @@
                 this.totalNodes = 0;
                 this.leafNodes = 0;
 
-                // 茎のパラメータを計算
+                // 茎を作成
                 const stemHeight = (2 * this.size) / 100;
-                const topHeight = stemHeight * 0.2; // createStemTopで使用する高さ
-
-                // 茎を作成 (内部で createStemTop も呼ばれる)
                 this.createStem();
 
-                // 枝分かれが始まるY座標を計算
-                // 地面のy=-2 + 茎の高さ + 茎の上部パーツの高さ
-                const startY = -2 + stemHeight + topHeight;
-
                 // 茎の上部から直接枝と花蕾を作成
-                this.createBranches(
-                    0, 
-                    startY, // 修正されたY座標
-                    0, 
-                    this.depth - 1, 
-                    (1.0 * this.size) / 100
-                );
+                // 茎の実際の上部位置を計算
+                const branchStartY = -2 + stemHeight + stemHeight * 0.2; // 地面 + 茎の高さ + 移行部分
+                this.createBranches(0, branchStartY, 0, this.depth - 1, (1.0 * this.size) / 100);
 
                 this.updateStats();
             }
-            // === ここまで修正 ===
 
             createStem() {
                 const stemHeight = (2 * this.size) / 100;
                 const stemRadius = (0.3 * this.size) / 100;
 
                 const geometry = new THREE.CylinderGeometry(
-                    stemRadius * 0.8, // 上部半径
+                    stemRadius * 0.8, // 上部半径（枝との接続をよくするため少し太く）
                     stemRadius,       // 下部半径
                     stemHeight,       // 高さ
                     8                 // セグメント
@@ -464,12 +474,17 @@
             createBranches(x, y, z, depth, branchLength, parentRadius = 0) {
                 if (depth <= 0) {
                     // 花蕾をクラスター状に配置してふさふさ感を演出
-                    this.createFloretCluster(x, y, z, branchLength);
+                    this.createFloretCluster(x, y, z, branchLength, depth);
                     this.leafNodes++;
                     return;
                 }
 
-                const branchCount = this.branches + Math.floor(Math.random() * 2); // ランダム性を追加
+                // 深度に応じて分岐数を制限（深いほど少なく）
+                const maxBranches = Math.max(2, this.branches - Math.floor((this.depth - depth) / 2));
+                const branchCount = Math.min(
+                    maxBranches + Math.floor(Math.random() * 2), 
+                    this.branches + 1  // 絶対上限
+                );
                 
                 // 球状に枝を配置するため、3D球面座標を使用
                 for (let i = 0; i < branchCount; i++) {
@@ -501,20 +516,99 @@
                 this.totalNodes++;
             }
 
+            createFloretCluster(x, y, z, size, depth = 0) {
+                // 深度とサイズに応じてクラスターサイズを制限
+                const baseClusterSize = Math.floor(size * 60); // 係数を下げて花蕾数を削減
+                const depthPenalty = Math.max(0.3, 1 - (this.depth - depth) * 0.2); // 深いほど少なく
+                const sizeFactor = Math.min(1.0, this.size / 100); // サイズが小さいほど少なく
+                
+                const clusterSize = Math.max(
+                    2, // 最小2個
+                    Math.min(
+                        8, // 最大8個に制限
+                        Math.floor(baseClusterSize * depthPenalty * sizeFactor)
+                    )
+                );
+                
+                const baseFloretSize = (0.12 * this.size) / 100;
+                
+                // メインの花蕾
+                this.createSingleFloret(x, y, z, baseFloretSize * 1.2);
+                
+                // 周囲にクラスター状に小さな花蕾を配置（数を制限）
+                for (let i = 0; i < clusterSize; i++) {
+                    // 球面座標でランダムな位置
+                    const phi = Math.random() * Math.PI * 2;
+                    const theta = Math.random() * Math.PI;
+                    const radius = baseFloretSize * (1 + Math.random() * 1.5); // 半径も少し制限
+                    
+                    const floretX = x + Math.sin(theta) * Math.cos(phi) * radius;
+                    const floretY = y + Math.cos(theta) * radius * 0.7;
+                    const floretZ = z + Math.sin(theta) * Math.sin(phi) * radius;
+                    
+                    const floretSize = baseFloretSize * (0.6 + Math.random() * 0.4); // サイズ範囲を狭める
+                    this.createSingleFloret(floretX, floretY, floretZ, floretSize);
+                }
+            }
+
+            createSingleFloret(x, y, z, size) {
+                // サイズに応じて適切な共有ジオメトリを選択
+                let geometry;
+                const normalizedSize = size / ((0.12 * this.size) / 100); // 基準サイズで正規化
+                
+                if (normalizedSize < 0.8) {
+                    geometry = this.floretGeometries.small;
+                } else if (normalizedSize < 1.2) {
+                    geometry = this.floretGeometries.medium;
+                } else {
+                    geometry = this.floretGeometries.large;
+                }
+                
+                // より自然な緑色
+                const hue = 0.28 + Math.random() * 0.04;
+                const saturation = 0.7 + Math.random() * 0.2;
+                const lightness = 0.4 + Math.random() * 0.2;
+                
+                const material = new THREE.MeshLambertMaterial({ 
+                    color: new THREE.Color().setHSL(hue, saturation, lightness)
+                });
+
+                const floret = new THREE.Mesh(geometry, material);
+                floret.position.set(x, y, z);
+                
+                // サイズをスケールで調整
+                const scale = size / 0.015; // 基準ジオメトリサイズに合わせて調整
+                floret.scale.set(scale, scale, scale);
+                
+                // ランダムな回転を追加
+                floret.rotation.set(
+                    Math.random() * Math.PI,
+                    Math.random() * Math.PI,
+                    Math.random() * Math.PI
+                );
+                
+                floret.castShadow = true;
+                floret.receiveShadow = true;
+
+                this.broccoliGroup.add(floret);
+            }
+
             createBranchSegment(x1, y1, z1, x2, y2, z2, depth) {
                 const direction = new THREE.Vector3(x2 - x1, y2 - y1, z2 - z1);
                 const length = direction.length();
                 
                 // 枝の太さを深度に応じて調整
-                const topRadius = Math.max(0.01, 0.03 * depth * (this.size / 100));
-                const bottomRadius = Math.max(0.015, 0.05 * depth * (this.size / 100));
+                const avgRadius = Math.max(0.01, 0.04 * depth * (this.size / 100));
                 
-                const geometry = new THREE.CylinderGeometry(
-                    topRadius,    // 上部半径
-                    bottomRadius, // 下部半径
-                    length,       // 長さ
-                    8             // セグメント
-                );
+                // 深度に応じて適切な共有ジオメトリを選択
+                let geometry;
+                if (avgRadius < 0.02) {
+                    geometry = this.branchGeometries.thin;
+                } else if (avgRadius < 0.035) {
+                    geometry = this.branchGeometries.medium;
+                } else {
+                    geometry = this.branchGeometries.thick;
+                }
 
                 // より自然な緑色のグラデーション
                 const hue = 0.25 + (depth * 0.02) + Math.random() * 0.02;
@@ -527,7 +621,8 @@
 
                 const branch = new THREE.Mesh(geometry, material);
                 
-                // 枝の位置と向きを設定
+                // スケール、位置、向きを設定
+                branch.scale.set(avgRadius, length, avgRadius);
                 branch.position.set(
                     (x1 + x2) / 2,
                     (y1 + y2) / 2,
@@ -613,6 +708,16 @@
                 document.getElementById('leaf-nodes').textContent = this.leafNodes;
                 const complexity = Math.round((this.totalNodes * this.depth * this.branches) / 8);
                 document.getElementById('tree-complexity').textContent = complexity;
+                
+                // デバッグ用：実際の花蕾数を表示（開発中のみ）
+                const actualFlorets = this.broccoliGroup.children.filter(child => 
+                    child.geometry === this.floretGeometries.small ||
+                    child.geometry === this.floretGeometries.medium ||
+                    child.geometry === this.floretGeometries.large
+                ).length;
+                
+                // コンソールに詳細情報を出力（パフォーマンス確認用）
+                console.log(`ノード数: ${this.totalNodes}, 花蕾数: ${actualFlorets}, 総オブジェクト数: ${this.broccoliGroup.children.length}`);
             }
 
             animate() {
