@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ブロッコリー決定木ビジュアライザー</title>
+    <title>3D ブロッコリー決定木ビジュアライザー</title>
     <style>
         body {
             font-family: 'Arial', sans-serif;
@@ -108,13 +108,14 @@
             padding: 30px;
             text-align: center;
             background: white;
+            position: relative;
         }
 
         #broccoli-canvas {
             border: 2px solid #e0e0e0;
             border-radius: 15px;
             box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-            background: linear-gradient(to bottom, #e8f5e8 0%, #f0f8f0 100%);
+            background: linear-gradient(to bottom, #87ceeb 0%, #e8f5e8 100%);
         }
 
         .info-panel {
@@ -151,20 +152,32 @@
             color: #666;
             margin-top: 5px;
         }
+
+        .controls-help {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(76, 175, 80, 0.9);
+            color: white;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 0.85em;
+            max-width: 200px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🥦 ブロッコリー決定木ビジュアライザー</h1>
-            <p>決定木のパラメータを調整して、ブロッコリーの形を変化させよう！</p>
+            <h1>🥦 3D ブロッコリー決定木ビジュアライザー</h1>
+            <p>決定木のパラメータを調整して、3Dブロッコリーの形を変化させよう！</p>
         </div>
 
         <div class="controls">
             <div class="control-group">
                 <label for="depth-slider">決定木の深さ (Tree Depth)</label>
                 <div class="slider-container">
-                    <input type="range" id="depth-slider" class="slider" min="2" max="8" value="4">
+                    <input type="range" id="depth-slider" class="slider" min="2" max="6" value="4">
                     <div class="value-display" id="depth-value">4</div>
                 </div>
             </div>
@@ -172,7 +185,7 @@
             <div class="control-group">
                 <label for="branches-slider">分岐数 (Branches per Node)</label>
                 <div class="slider-container">
-                    <input type="range" id="branches-slider" class="slider" min="2" max="6" value="3">
+                    <input type="range" id="branches-slider" class="slider" min="2" max="5" value="3">
                     <div class="value-display" id="branches-value">3</div>
                 </div>
             </div>
@@ -187,12 +200,17 @@
         </div>
 
         <div class="canvas-container">
-            <canvas id="broccoli-canvas" width="800" height="600"></canvas>
+            <div class="controls-help">
+                🖱️ マウスドラッグ: 回転<br>
+                🖱️ 右クリック: パン<br>
+                📱 スクロール: ズーム
+            </div>
+            <div id="broccoli-canvas"></div>
         </div>
 
         <div class="info-panel">
-            <strong>🌳 決定木とブロッコリーの類似性</strong><br>
-            決定木は根から始まって枝分かれし、最終的に葉（決定）に到達します。ブロッコリーも茎から始まって枝分かれし、小さな花蕾に到達する構造を持っています。
+            <strong>🌳 3D決定木とブロッコリーの類似性</strong><br>
+            決定木は根から始まって枝分かれし、最終的に葉（決定）に到達します。ブロッコリーも茎から始まって3次元的に枝分かれし、小さな花蕾に到達する構造を持っています。
             
             <div class="stats">
                 <div class="stat-item">
@@ -211,19 +229,114 @@
         </div>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script>
-        class BroccoliDecisionTree {
-            constructor(canvas) {
-                this.canvas = canvas;
-                this.ctx = canvas.getContext('2d');
+        class Broccoli3DDecisionTree {
+            constructor(container) {
+                this.container = container;
                 this.depth = 4;
                 this.branches = 3;
                 this.size = 100;
                 this.totalNodes = 0;
                 this.leafNodes = 0;
                 this.drawTimeout = null;
+                
+                this.initThreeJS();
                 this.setupEventListeners();
-                this.draw();
+                this.createBroccoli();
+                this.animate();
+            }
+
+            initThreeJS() {
+                // シーンの作成
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0x87ceeb);
+
+                // カメラの作成
+                this.camera = new THREE.PerspectiveCamera(75, 800 / 600, 0.1, 1000);
+                this.camera.position.set(5, 5, 5);
+                this.camera.lookAt(0, 0, 0);
+
+                // レンダラーの作成
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                this.renderer.setSize(800, 600);
+                this.renderer.shadowMap.enabled = true;
+                this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                this.container.appendChild(this.renderer.domElement);
+
+                // ライティング
+                const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+                this.scene.add(ambientLight);
+
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(10, 10, 5);
+                directionalLight.castShadow = true;
+                directionalLight.shadow.mapSize.width = 2048;
+                directionalLight.shadow.mapSize.height = 2048;
+                this.scene.add(directionalLight);
+
+                // 地面
+                const groundGeometry = new THREE.PlaneGeometry(20, 20);
+                const groundMaterial = new THREE.MeshLambertMaterial({ color: 0x90ee90 });
+                const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+                ground.rotation.x = -Math.PI / 2;
+                ground.position.y = -2;
+                ground.receiveShadow = true;
+                this.scene.add(ground);
+
+                // コントロール（簡易版）
+                this.setupControls();
+
+                // ブロッコリーグループ
+                this.broccoliGroup = new THREE.Group();
+                this.scene.add(this.broccoliGroup);
+            }
+
+            setupControls() {
+                let isDragging = false;
+                let isRightDragging = false;
+                let previousMousePosition = { x: 0, y: 0 };
+
+                this.renderer.domElement.addEventListener('mousedown', (e) => {
+                    if (e.button === 0) isDragging = true;
+                    if (e.button === 2) isRightDragging = true;
+                    previousMousePosition.x = e.offsetX;
+                    previousMousePosition.y = e.offsetY;
+                });
+
+                this.renderer.domElement.addEventListener('mousemove', (e) => {
+                    if (isDragging) {
+                        const deltaX = e.offsetX - previousMousePosition.x;
+                        const deltaY = e.offsetY - previousMousePosition.y;
+                        
+                        this.broccoliGroup.rotation.y += deltaX * 0.01;
+                        this.broccoliGroup.rotation.x += deltaY * 0.01;
+                    }
+                    if (isRightDragging) {
+                        const deltaX = e.offsetX - previousMousePosition.x;
+                        const deltaY = e.offsetY - previousMousePosition.y;
+                        
+                        this.camera.position.x -= deltaX * 0.01;
+                        this.camera.position.y += deltaY * 0.01;
+                    }
+                    previousMousePosition.x = e.offsetX;
+                    previousMousePosition.y = e.offsetY;
+                });
+
+                this.renderer.domElement.addEventListener('mouseup', () => {
+                    isDragging = false;
+                    isRightDragging = false;
+                });
+
+                this.renderer.domElement.addEventListener('wheel', (e) => {
+                    const scale = e.deltaY > 0 ? 1.1 : 0.9;
+                    this.camera.position.multiplyScalar(scale);
+                    e.preventDefault();
+                });
+
+                this.renderer.domElement.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                });
             }
 
             setupEventListeners() {
@@ -231,210 +344,268 @@
                 const branchesSlider = document.getElementById('branches-slider');
                 const sizeSlider = document.getElementById('size-slider');
 
-                // デバウンス処理で描画を最適化
-                const debouncedDraw = () => {
+                const debouncedCreate = () => {
                     if (this.drawTimeout) {
                         clearTimeout(this.drawTimeout);
                     }
-                    this.drawTimeout = setTimeout(() => this.draw(), 50);
+                    this.drawTimeout = setTimeout(() => this.createBroccoli(), 100);
                 };
 
                 depthSlider.addEventListener('input', (e) => {
                     this.depth = parseInt(e.target.value);
                     document.getElementById('depth-value').textContent = this.depth;
-                    debouncedDraw();
+                    debouncedCreate();
                 });
 
                 branchesSlider.addEventListener('input', (e) => {
                     this.branches = parseInt(e.target.value);
                     document.getElementById('branches-value').textContent = this.branches;
-                    debouncedDraw();
+                    debouncedCreate();
                 });
 
                 sizeSlider.addEventListener('input', (e) => {
                     this.size = parseInt(e.target.value);
                     document.getElementById('size-value').textContent = this.size + '%';
-                    debouncedDraw();
+                    debouncedCreate();
                 });
             }
 
-            draw() {
-                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            // === ここから修正 ===
+            createBroccoli() {
+                // 既存のブロッコリーを削除
+                while (this.broccoliGroup.children.length > 0) {
+                    const child = this.broccoliGroup.children[0];
+                    this.broccoliGroup.remove(child);
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) child.material.dispose();
+                }
+
                 this.totalNodes = 0;
                 this.leafNodes = 0;
 
-                const startX = this.canvas.width / 2;
-                const startY = this.canvas.height - 50;
-                const initialLength = (120 * this.size) / 100;
+                // 茎のパラメータを計算
+                const stemHeight = (2 * this.size) / 100;
+                const topHeight = stemHeight * 0.2; // createStemTopで使用する高さ
 
-                // 中央の太い茎を描画
-                this.drawMainStem(startX, startY, initialLength);
-                
-                // 左右対称に枝を描画
-                this.drawSymmetricBranches(startX, startY - initialLength, this.depth - 1, initialLength * 0.7);
+                // 茎を作成 (内部で createStemTop も呼ばれる)
+                this.createStem();
+
+                // 枝分かれが始まるY座標を計算
+                // 地面のy=-2 + 茎の高さ + 茎の上部パーツの高さ
+                const startY = -2 + stemHeight + topHeight;
+
+                // 茎の上部から直接枝と花蕾を作成
+                this.createBranches(
+                    0, 
+                    startY, // 修正されたY座標
+                    0, 
+                    this.depth - 1, 
+                    (1.0 * this.size) / 100
+                );
+
                 this.updateStats();
             }
+            // === ここまで修正 ===
 
-            drawMainStem(x, y, length) {
-                const endY = y - length;
-                
-                // 太い茎のグラデーション
-                const gradient = this.ctx.createLinearGradient(x - 15, y, x + 15, endY);
-                gradient.addColorStop(0, '#4a5c2a');
-                gradient.addColorStop(0.3, '#6b7c3a');
-                gradient.addColorStop(0.7, '#7cb342');
-                gradient.addColorStop(1, '#8bc34a');
+            createStem() {
+                const stemHeight = (2 * this.size) / 100;
+                const stemRadius = (0.3 * this.size) / 100;
 
-                this.ctx.fillStyle = gradient;
-                this.ctx.beginPath();
-                
-                // 下部は太く、上部に向かって細くなる台形状
-                const bottomWidth = 20 * (this.size / 100);
-                const topWidth = 12 * (this.size / 100);
-                
-                this.ctx.moveTo(x - bottomWidth/2, y);
-                this.ctx.lineTo(x + bottomWidth/2, y);
-                this.ctx.lineTo(x + topWidth/2, endY);
-                this.ctx.lineTo(x - topWidth/2, endY);
-                this.ctx.closePath();
-                this.ctx.fill();
+                const geometry = new THREE.CylinderGeometry(
+                    stemRadius * 0.8, // 上部半径
+                    stemRadius,       // 下部半径
+                    stemHeight,       // 高さ
+                    8                 // セグメント
+                );
 
-                // 茎の中央のハイライト
-                this.ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-                this.ctx.beginPath();
-                this.ctx.moveTo(x - 2, y);
-                this.ctx.lineTo(x + 2, y);
-                this.ctx.lineTo(x + 1, endY);
-                this.ctx.lineTo(x - 1, endY);
-                this.ctx.closePath();
-                this.ctx.fill();
+                const material = new THREE.MeshLambertMaterial({ 
+                    color: 0x4a5c2a // 濃い緑
+                });
 
+                const stem = new THREE.Mesh(geometry, material);
+                // 茎の底が地面（y=-2）に接するように位置を調整
+                stem.position.y = -2 + stemHeight / 2;
+                stem.castShadow = true;
+                stem.receiveShadow = true;
+
+                this.broccoliGroup.add(stem);
                 this.totalNodes++;
-            }
-
-            drawSymmetricBranches(centerX, centerY, depth, length) {
-                if (depth <= 0) return;
-
-                const branchCount = this.branches;
-                const totalAngle = Math.PI * 0.8; // 左右に広がる角度
-                const angleStep = totalAngle / (branchCount + 1);
                 
-                // 中央から左右対称に枝を配置
-                for (let i = 0; i < branchCount; i++) {
-                    const baseAngle = -Math.PI/2; // 上向き
-                    const offset = (i - (branchCount - 1) / 2) * angleStep;
-                    const angle = baseAngle + offset;
-                    
-                    // 各枝の長さにランダム性を追加（ただし対称性を保つ）
-                    const seed = Math.sin(i * 1000) * 0.5 + 0.5; // 疑似ランダム
-                    const branchLength = length * (0.7 + seed * 0.2);
-                    
-                    this.drawBranch(centerX, centerY, angle, branchLength, depth, 2);
-                }
+                // 茎の上部に移行部分を追加して自然に接続
+                this.createStemTop();
             }
 
-            drawBranch(x, y, angle, length, depth, level) {
+            createStemTop() {
+                const stemHeight = (2 * this.size) / 100;
+                const stemRadius = (0.3 * this.size) / 100;
+                const topHeight = stemHeight * 0.2;
+                
+                const geometry = new THREE.CylinderGeometry(
+                    stemRadius * 0.4, // 上部（細く）
+                    stemRadius * 0.8, // 下部（茎の上部と同じ）
+                    topHeight,
+                    8
+                );
+
+                // 茎から枝への色の移行
+                const material = new THREE.MeshLambertMaterial({ 
+                    color: 0x6b7c3a // 中間色
+                });
+
+                const stemTop = new THREE.Mesh(geometry, material);
+                // 茎の上部に配置
+                stemTop.position.y = -2 + stemHeight + topHeight / 2;
+                stemTop.castShadow = true;
+                stemTop.receiveShadow = true;
+
+                this.broccoliGroup.add(stemTop);
+            }
+
+            createBranches(x, y, z, depth, branchLength, parentRadius = 0) {
                 if (depth <= 0) {
-                    this.drawFloret(x, y, length / 3);
+                    // 花蕾をクラスター状に配置してふさふさ感を演出
+                    this.createFloretCluster(x, y, z, branchLength);
                     this.leafNodes++;
                     return;
                 }
 
-                this.totalNodes++;
-
-                const endX = x + Math.cos(angle) * length;
-                const endY = y + Math.sin(angle) * length;
-
-                // 枝の太さをレベルに応じて調整
-                const baseWidth = Math.max(3, (depth * 3) + (8 - level * 1.5));
-                const endWidth = Math.max(1, baseWidth * 0.6);
-
-                // 枝を太い線として描画
-                this.drawThickLine(x, y, endX, endY, baseWidth, endWidth, level);
-
-                // 次のレベルの枝を再帰的に描画
-                if (depth > 1) {
-                    const subBranches = Math.min(this.branches, 3); // 枝数を制限
-                    const angleRange = Math.PI / 2;
-                    const angleStep = angleRange / (subBranches + 1);
+                const branchCount = this.branches + Math.floor(Math.random() * 2); // ランダム性を追加
+                
+                // 球状に枝を配置するため、3D球面座標を使用
+                for (let i = 0; i < branchCount; i++) {
+                    // 球面座標でランダムな方向を生成
+                    const phi = Math.random() * Math.PI * 2; // 方位角 (0-2π)
+                    const theta = Math.acos(1 - Math.random() * 0.8); // 極角 (上方向に偏重)
                     
-                    for (let i = 0; i < subBranches; i++) {
-                        const branchAngle = angle - angleRange/2 + angleStep * (i + 1);
-                        const branchLength = length * 0.65;
-                        
-                        this.drawBranch(endX, endY, branchAngle, branchLength, depth - 1, level + 1);
-                    }
+                    const branchRadius = branchLength * (0.5 + Math.random() * 0.4);
+                    
+                    // 球面座標から直交座標への変換
+                    const branchX = x + Math.sin(theta) * Math.cos(phi) * branchRadius;
+                    const branchY = y + Math.cos(theta) * branchRadius * 0.8; // Y方向の伸びを調整
+                    const branchZ = z + Math.sin(theta) * Math.sin(phi) * branchRadius;
+
+                    // 枝を描画（茎からつながるように）
+                    this.createBranchSegment(x, y, z, branchX, branchY, branchZ, depth);
+
+                    // 再帰的に次の枝を作成
+                    this.createBranches(
+                        branchX, 
+                        branchY, 
+                        branchZ, 
+                        depth - 1, 
+                        branchLength * (0.6 + Math.random() * 0.1),
+                        branchRadius
+                    );
+                }
+
+                this.totalNodes++;
+            }
+
+            createBranchSegment(x1, y1, z1, x2, y2, z2, depth) {
+                const direction = new THREE.Vector3(x2 - x1, y2 - y1, z2 - z1);
+                const length = direction.length();
+                
+                // 枝の太さを深度に応じて調整
+                const topRadius = Math.max(0.01, 0.03 * depth * (this.size / 100));
+                const bottomRadius = Math.max(0.015, 0.05 * depth * (this.size / 100));
+                
+                const geometry = new THREE.CylinderGeometry(
+                    topRadius,    // 上部半径
+                    bottomRadius, // 下部半径
+                    length,       // 長さ
+                    8             // セグメント
+                );
+
+                // より自然な緑色のグラデーション
+                const hue = 0.25 + (depth * 0.02) + Math.random() * 0.02;
+                const saturation = 0.6 + Math.random() * 0.2;
+                const lightness = 0.3 + (depth * 0.05) + Math.random() * 0.1;
+                
+                const material = new THREE.MeshLambertMaterial({ 
+                    color: new THREE.Color().setHSL(hue, saturation, lightness)
+                });
+
+                const branch = new THREE.Mesh(geometry, material);
+                
+                // 枝の位置と向きを設定
+                branch.position.set(
+                    (x1 + x2) / 2,
+                    (y1 + y2) / 2,
+                    (z1 + z2) / 2
+                );
+
+                direction.normalize();
+                const axis = new THREE.Vector3(0, 1, 0);
+                const quaternion = new THREE.Quaternion().setFromUnitVectors(axis, direction);
+                branch.quaternion.copy(quaternion);
+
+                branch.castShadow = true;
+                branch.receiveShadow = true;
+
+                this.broccoliGroup.add(branch);
+            }
+
+            createFloretCluster(x, y, z, size) {
+                const clusterSize = Math.max(3, Math.floor(size * 100) + 2);
+                const baseFloretSize = (0.12 * this.size) / 100;
+                
+                // メインの花蕾
+                this.createSingleFloret(x, y, z, baseFloretSize * 1.2);
+                
+                // 周囲にクラスター状に小さな花蕾を配置
+                for (let i = 0; i < clusterSize; i++) {
+                    // 球面座標でランダムな位置
+                    const phi = Math.random() * Math.PI * 2;
+                    const theta = Math.random() * Math.PI;
+                    const radius = baseFloretSize * (1 + Math.random() * 2);
+                    
+                    const floretX = x + Math.sin(theta) * Math.cos(phi) * radius;
+                    const floretY = y + Math.cos(theta) * radius * 0.7;
+                    const floretZ = z + Math.sin(theta) * Math.sin(phi) * radius;
+                    
+                    const floretSize = baseFloretSize * (0.6 + Math.random() * 0.6);
+                    this.createSingleFloret(floretX, floretY, floretZ, floretSize);
                 }
             }
 
-            drawThickLine(x1, y1, x2, y2, startWidth, endWidth, level) {
-                const dx = x2 - x1;
-                const dy = y2 - y1;
-                const length = Math.sqrt(dx * dx + dy * dy);
-                const unitX = dx / length;
-                const unitY = dy / length;
+            createSingleFloret(x, y, z, size) {
+                // 不規則な形状でよりリアルな花蕾を作成
+                const geometry = new THREE.SphereGeometry(size, 6, 4);
                 
-                // 垂直方向のベクトル
-                const perpX = -unitY;
-                const perpY = unitX;
+                // ランダムな変形を加える
+                const vertices = geometry.attributes.position.array;
+                for (let i = 0; i < vertices.length; i += 3) {
+                    const scale = 0.8 + Math.random() * 0.4;
+                    vertices[i] *= scale;
+                    vertices[i + 1] *= scale;
+                    vertices[i + 2] *= scale;
+                }
+                geometry.attributes.position.needsUpdate = true;
+                geometry.computeVertexNormals();
+                
+                // より自然な緑色
+                const hue = 0.28 + Math.random() * 0.04;
+                const saturation = 0.7 + Math.random() * 0.2;
+                const lightness = 0.4 + Math.random() * 0.2;
+                
+                const material = new THREE.MeshLambertMaterial({ 
+                    color: new THREE.Color().setHSL(hue, saturation, lightness)
+                });
 
-                const stemColor = this.getStemColor(level);
-                const gradient = this.ctx.createLinearGradient(
-                    x1 + perpX * startWidth/2, y1 + perpY * startWidth/2,
-                    x1 - perpX * startWidth/2, y1 - perpY * startWidth/2
+                const floret = new THREE.Mesh(geometry, material);
+                floret.position.set(x, y, z);
+                
+                // ランダムな回転を追加
+                floret.rotation.set(
+                    Math.random() * Math.PI,
+                    Math.random() * Math.PI,
+                    Math.random() * Math.PI
                 );
-                gradient.addColorStop(0, stemColor.dark);
-                gradient.addColorStop(0.5, stemColor.light);
-                gradient.addColorStop(1, stemColor.dark);
-
-                this.ctx.fillStyle = gradient;
-                this.ctx.beginPath();
                 
-                // 太い線を四角形として描画
-                this.ctx.moveTo(x1 + perpX * startWidth/2, y1 + perpY * startWidth/2);
-                this.ctx.lineTo(x1 - perpX * startWidth/2, y1 - perpY * startWidth/2);
-                this.ctx.lineTo(x2 - perpX * endWidth/2, y2 - perpY * endWidth/2);
-                this.ctx.lineTo(x2 + perpX * endWidth/2, y2 + perpY * endWidth/2);
-                this.ctx.closePath();
-                this.ctx.fill();
-            }
+                floret.castShadow = true;
+                floret.receiveShadow = true;
 
-            getStemColor(level) {
-                const colors = [
-                    { light: '#8bc34a', dark: '#558b2f' },
-                    { light: '#7cb342', dark: '#4a5c2a' },
-                    { light: '#689f38', dark: '#33691e' },
-                    { light: '#558b2f', dark: '#2e7d32' }
-                ];
-                return colors[Math.min(level - 1, colors.length - 1)];
-            }
-
-            drawFloret(x, y, size) {
-                const floretSize = Math.max(4, size * (0.9 + Math.sin(x + y) * 0.1));
-                
-                // 花蕾の影（性能向上のため簡略化）
-                this.ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
-                this.ctx.beginPath();
-                this.ctx.arc(x + 1, y + 1, floretSize, 0, Math.PI * 2);
-                this.ctx.fill();
-
-                // 花蕾のメイン部分
-                const gradient = this.ctx.createRadialGradient(x, y, 0, x, y, floretSize);
-                gradient.addColorStop(0, '#c8e6c9');
-                gradient.addColorStop(0.4, '#81c784');
-                gradient.addColorStop(0.8, '#66bb6a');
-                gradient.addColorStop(1, '#4caf50');
-                
-                this.ctx.fillStyle = gradient;
-                this.ctx.beginPath();
-                this.ctx.arc(x, y, floretSize, 0, Math.PI * 2);
-                this.ctx.fill();
-
-                // ハイライト
-                this.ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-                this.ctx.beginPath();
-                this.ctx.arc(x - floretSize * 0.25, y - floretSize * 0.25, floretSize * 0.3, 0, Math.PI * 2);
-                this.ctx.fill();
+                this.broccoliGroup.add(floret);
             }
 
             updateStats() {
@@ -443,12 +614,21 @@
                 const complexity = Math.round((this.totalNodes * this.depth * this.branches) / 8);
                 document.getElementById('tree-complexity').textContent = complexity;
             }
+
+            animate() {
+                requestAnimationFrame(() => this.animate());
+                
+                // 自動回転（ゆっくり）
+                this.broccoliGroup.rotation.y += 0.003;
+                
+                this.renderer.render(this.scene, this.camera);
+            }
         }
 
         // 初期化
         document.addEventListener('DOMContentLoaded', () => {
-            const canvas = document.getElementById('broccoli-canvas');
-            new BroccoliDecisionTree(canvas);
+            const container = document.getElementById('broccoli-canvas');
+            new Broccoli3DDecisionTree(container);
         });
     </script>
 </body>
